@@ -1,0 +1,8 @@
+async-rag-gateway/
+├── app/
+│   ├── __init__.py
+│   ├── main.py            # FastAPI エンドポイント
+│   └── bedrock_service.py # 非同期Bedrock Converse API 処理
+├── Dockerfile
+├── requirements.txt
+└── docker-compose.yml
