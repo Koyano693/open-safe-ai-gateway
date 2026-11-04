@@ -1,0 +1,39 @@
+version: "2.0.0"
+policy_name: "enterprise-comprehensive-guardrail"
+description: "PII mask, content filters, and denied topics managed by Policy as Code"
+
+# 1. 有害表現・コンテンツフィルターの閾値設定 (NONE, LOW, MEDIUM, HIGH)
+content_filters:
+  - type: "HATE"
+    inputStrength: "MEDIUM"
+    outputStrength: "MEDIUM"
+  - type: "INSULT"
+    inputStrength: "MEDIUM"
+    outputStrength: "MEDIUM"
+  - type: "SEXUAL"
+    inputStrength: "HIGH"
+    outputStrength: "HIGH"
+  - type: "VIOLENCE"
+    inputStrength: "MEDIUM"
+    outputStrength: "MEDIUM"
+  - type: "MISCONDUCT"
+    inputStrength: "MEDIUM"
+    outputStrength: "MEDIUM"
+
+# 2. 個人情報（PII）のフィルターおよびマスク設定 (BLOCK または ANONYMIZE)
+pii_entities:
+  - type: "EMAIL"
+    action: "ANONYMIZE"
+  - type: "PHONE"
+    action: "ANONYMIZE"
+  - type: "CREDIT_CARD_DEBIT_CARD_NUMBER"
+    action: "BLOCK"
+  - type: "US_SOCIAL_SECURITY_NUMBER"
+    action: "BLOCK"
+
+# 3. 拒否トピックの定義
+denied_topics:
+  - name: "投資・金融アドバイスの禁止"
+    description: "個別の株式銘柄の推奨、売買のタイミング、具体的な投資リターンの約束に関する助言。"
+  - name: "社外秘情報の開示禁止"
+    description: "未発表の財務データ、インサイダー情報、機密性の高い内部規定。"
