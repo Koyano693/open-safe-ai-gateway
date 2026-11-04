@@ -1,0 +1,6 @@
+curl -X POST http://localhost:8080/v1/chat/secure-completions \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secure-internal-gateway-token" \
+  -d '{
+    "prompt": "日本の首都はどこですか？ 連絡先は test@example.com です。"
+  }'
