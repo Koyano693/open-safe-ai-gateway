@@ -1,0 +1,2 @@
+export GATEWAY_URL="http://localhost:8080/v1/chat/secure-rag"
+export API_KEY="your-secure-internal-token" # docker-compose.ymlで指定したトークン
