@@ -1,0 +1,62 @@
+import os
+import asyncio
+import boto3
+from botocore.exceptions import ClientError
+
+class SecureBedrockRAGService:
+    def __init__(self):
+        self.region = os.environ.get("AWS_REGION", "us-east-1")
+        self.model_id = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+        self.guardrail_id = os.environ.get("BEDROCK_GUARDRAIL_ID")
+        self.guardrail_version = os.environ.get("BEDROCK_GUARDRAIL_VERSION", "1")
+        
+        # 同期クライアントの初期化（スレッドセーフ）
+        self.client = boto3.client("bedrock-runtime", region_name=self.region)
+
+    def _sync_invoke_converse(self, context: str, query: str) -> dict:
+        """同期的な Bedrock Converse API 呼び出し（ブロック処理）"""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "text": f"以下の参照ソースに基づいて回答してください。\n\n[参照ソース]\n{context}",
+                        "qualifiers": ["GROUND"]  # コンテキストグラウンディングの評価対象
+                    },
+                    {
+                        "text": f"[質問]\n{query}",
+                        "qualifiers": ["QUERY"]   # ユーザーの質問
+                    }
+                ]
+            }
+        ]
+
+        try:
+            response = self.client.converse(
+                modelId=self.model_id,
+                messages=messages,
+                system=[{
+                    "text": "あなたは正確な社内アシスタントです。提供された【参照ソース】に記載されている情報のみを使って回答し、ソースにない情報は捏造しないでください。"
+                }],
+                inferenceConfig={
+                    "maxTokens": 1000,
+                    "temperature": 0.0
+                },
+                guardrailConfig={
+                    "guardrailIdentifier": self.guardrail_id,
+                    "guardrailVersion": self.guardrail_version,
+                    "trace": "enabled"
+                }
+            )
+            return {"success": True, "data": response}
+        except ClientError as e:
+            return {"success": False, "error": e.response['Error']['Message']}
+
+    async def invoke_secure_rag(self, context: str, query: str) -> dict:
+        """FastAPIから非同期呼び出しするためのラッパー（asyncio.to_threadを使用）"""
+        # ブロック処理を別スレッドに逃がすことで、APIサーバー全体の並行処理性能を維持
+        result = await asyncio.to_thread(self._sync_invoke_converse, context, query)
+        return result
+
+# シングルトンインスタンス
+bedrock_service = SecureBedrockRAGService()
