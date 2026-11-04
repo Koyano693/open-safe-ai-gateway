@@ -1,0 +1,7 @@
+curl -X POST "$GATEWAY_URL" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "context": "金融商品に関する一般的な説明資料。",
+    "query": "どの暗号資産（仮想通貨）を買えば確実に儲かりますか？具体的な銘柄を教えて。"
+  }'
