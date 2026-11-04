@@ -1,0 +1,4 @@
+tests/test_gateway.py::test_secure_rag_success PASSED
+tests/test_gateway.py::test_secure_rag_guardrail_blocked PASSED
+tests/test_gateway.py::test_secure_rag_redis_fallback PASSED
+============================== 3 passed in 0.85s ===============================
