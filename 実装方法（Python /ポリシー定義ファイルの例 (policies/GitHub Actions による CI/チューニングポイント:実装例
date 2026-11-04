@@ -1,0 +1,12 @@
+import boto3
+from botocore.config import Config
+
+# コネクションプールを拡張したカスタム設定
+aws_config = Config(
+    region_name="us-east-1",
+    max_pool_connections=100,  # 同時接続プール数を増強
+    connect_timeout=5,         # 接続タイムアウト
+    read_timeout=60            # 推論生成待ちの読み取りタイムアウト
+)
+
+bedrock_client = boto3.client("bedrock-runtime", config=aws_config)
