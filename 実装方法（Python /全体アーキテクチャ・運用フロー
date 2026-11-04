@@ -1,0 +1,14 @@
+[ 開発者 / セキュリティ担当者 ]
+         │ (Pull Requestを作成)
+         ▼
+【 GitHub リポジトリ 】
+   ├── policies/ (YAMLポリシー定義)
+   └── .github/workflows/policy-pipeline.yml (CI/CD)
+         │
+         ├── 1. CI (構文・整合性チェック、自動テスト)
+         ▼
+   [ Main ブランチへマージ ]
+         │
+         └── 2. CD (自動デプロイ)
+               ├── AWS Bedrock Guardrails API
+               └── または 社内LLM Guard サーバーへ即時反映
