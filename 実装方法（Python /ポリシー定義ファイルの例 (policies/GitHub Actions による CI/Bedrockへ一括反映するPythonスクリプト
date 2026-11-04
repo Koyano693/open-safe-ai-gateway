@@ -1,0 +1,79 @@
+import os
+import sys
+import yaml
+import boto3
+from botocore.exceptions import ClientError
+
+def load_policy(file_path: str) -> dict:
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
+
+def deploy_comprehensive_guardrail():
+    guardrail_id = os.environ.get("BEDROCK_GUARDRAIL_ID")
+    aws_region = os.environ.get("AWS_REGION", "us-east-1")
+    
+    if not guardrail_id:
+        print("[ERROR] BEDROCK_GUARDRAIL_ID is not set.")
+        sys.exit(1)
+
+    policy = load_policy("policies/guardrail-config.yaml")
+    client = boto3.client("bedrock", region_name=aws_region)
+
+    # 1. Content Filters のマッピング
+    content_policy_config = []
+    for cf in policy.get("content_filters", []):
+        content_policy_config.append({
+            "type": cf["type"],
+            "inputStrength": cf["inputStrength"],
+            "outputStrength": cf["outputStrength"]
+        })
+
+    # 2. PII Entities のマッピング
+    pii_entities_config = []
+    for pii in policy.get("pii_entities", []):
+        pii_entities_config.append({
+            "type": pii["type"],
+            "action": pii["action"] # BLOCK または ANONYMIZE
+        })
+
+    # 3. Denied Topics のマッピング
+    topics_config = []
+    for topic in policy.get("denied_topics", []):
+        topics_config.append({
+            "name": topic["name"],
+            "definition": topic["description"],
+            "examples": ["関連する質問の例です"],
+            "type": "DENY"
+        })
+
+    try:
+        print(f"[INFO] Updating Bedrock Guardrail ID: {guardrail_id} with comprehensive policy...")
+        
+        # Bedrock Guardrails API 呼び出し
+        response = client.update_guardrail(
+            guardrailIdentifier=guardrail_id,
+            name=policy.get("policy_name", "managed-guardrail"),
+            description=policy.get("description", ""),
+            # 各ポリシー設定を統合反映
+            contentPolicyConfig={"filtersConfig": content_policy_config},
+            sensitiveInformationPolicyConfig={"piiEntitiesConfig": pii_entities_config},
+            topicPolicyConfig={"topicsConfig": topics_config},
+            blockedInputMessaging="このプロンプトはセキュリティポリシーによりブロックされました。",
+            blockedOutputsMessaging="生成された応答はセキュリティポリシーによりブロックされました。"
+        )
+        print("[SUCCESS] Guardrail updated successfully.")
+
+        # バージョンの新規発行（本番反映用）
+        print("[INFO] Creating new guardrail version...")
+        version_resp = client.create_guardrail_version(
+            guardrailIdentifier=guardrail_id,
+            description="Auto-deployed via GitHub Actions PaC"
+        )
+        print(f"[SUCCESS] New version published: {version_resp.get('version')}")
+
+    except ClientError as e:
+        print(f"[ERROR] AWS API Error: {e.response['Error']['Message']}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    deploy_comprehensive_guardrail()
