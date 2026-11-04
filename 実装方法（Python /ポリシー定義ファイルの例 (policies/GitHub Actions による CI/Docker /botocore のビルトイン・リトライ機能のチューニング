@@ -1,0 +1,15 @@
+import boto3
+from botocore.config import Config
+
+# リトライとバックオフを高度にチューニングした設定
+aws_config = Config(
+    region_name="us-east-1",
+    retries={
+        'max_attempts': 5,          # 最大再試行回数（初回＋リトライ4回）
+        'mode': 'adaptive'          # 'adaptive' モードでは、クライアント側でもレート制限を予測し自動でバックオフを調整
+    },
+    max_pool_connections=50
+)
+
+# クライアントの初期化時にConfigを渡す
+bedrock_client = boto3.client("bedrock-runtime", config=aws_config)
