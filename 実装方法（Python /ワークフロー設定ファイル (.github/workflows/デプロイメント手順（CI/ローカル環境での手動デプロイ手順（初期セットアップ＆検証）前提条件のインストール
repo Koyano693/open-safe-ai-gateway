@@ -1,0 +1,12 @@
+# 1. terraformディレクトリへ移動
+cd terraform
+
+# 2. プロバイダーやモジュールの初期化
+terraform init
+
+# 3. 実行計画（Plan）の作成と確認
+# どのようなリソースが新規作成・変更されるかを必ず目視で精査します
+terraform plan -out=tfplan.binary
+
+# 4. 適用（Apply）
+terraform apply tfplan.binary
