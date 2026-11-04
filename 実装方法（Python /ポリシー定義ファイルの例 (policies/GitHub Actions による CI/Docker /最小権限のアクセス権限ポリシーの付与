@@ -1,0 +1,14 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:UpdateGuardrail",
+                "bedrock:CreateGuardrailVersion",
+                "bedrock:GetGuardrail"
+            ],
+            "Resource": "arn:aws:bedrock:us-east-1:123456789012:guardrail/your-guardrail-id-xxx"
+        }
+    ]
+}
