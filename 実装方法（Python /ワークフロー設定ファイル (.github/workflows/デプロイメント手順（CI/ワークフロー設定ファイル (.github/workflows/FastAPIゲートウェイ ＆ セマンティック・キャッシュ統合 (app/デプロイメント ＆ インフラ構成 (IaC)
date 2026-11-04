@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  redis-stack:
+    image: redis/redis-stack-server:latest
+    container_name: safe-ai-redis-stack
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ai-gateway-network
+
+  ai-gateway:
+    build: .
+    container_name: safe-ai-gateway-app
+    ports:
+      - "8080:8080"
+    environment:
+      - AWS_REGION=us-east-1
+      - REDIS_URL=redis://redis-stack:6379
+      - BEDROCK_GUARDRAIL_ID=${BEDROCK_GUARDRAIL_ID}
+    depends_on:
+      redis-stack:
+        condition: service_healthy
+    networks:
+      - ai-gateway-network
+
+networks:
+  ai-gateway-network:
+    driver: bridge
