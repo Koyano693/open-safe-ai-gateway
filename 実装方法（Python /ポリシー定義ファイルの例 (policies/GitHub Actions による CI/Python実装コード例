@@ -1,0 +1,81 @@
+import os
+import boto3
+from botocore.exceptions import ClientError
+
+def secure_rag_inference():
+    # Bedrock Runtimeクライアントの初期化
+    client = boto3.client("bedrock-runtime", region_name="us-east-1")
+    
+    # モデルID（例: Claude 3.5 Sonnet）
+    model_id = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    
+    # ガードレールIDとバージョン（あらかじめAWS上で作成したもの）
+    guardrail_id = os.environ.get("BEDROCK_GUARDRAIL_ID", "your-guardrail-id-xxx")
+    guardrail_version = "1"
+
+    # 1. RAGの検索フェーズで取得した外部データ（コンテキスト）とユーザーの質問
+    retrieved_context = (
+        "社内規定第10条：有給休暇は入社半年後に10日付与されます。"
+        "また、有給休暇の繰越は最大20日まで可能です。"
+    )
+    user_query = "有給休暇は何日まで繰り越すことができますか？また、半休は取れますか？"
+
+    # 2. Converse API向けのメッセージ構築
+    # グラウンディングチェックを有効にするため、qualifiers で GROUND と QUERY を指定する
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "text": f"以下の参照ソースに基づいて回答してください。\n\n[参照ソース]\n{retrieved_context}",
+                    "qualifiers": ["GROUND"]  # グラウンディングの評価対象（情報源）
+                },
+                {
+                    "text": f"[質問]\n{user_query}",
+                    "qualifiers": ["QUERY"]   # ユーザーの質問
+                }
+            ]
+        }
+    ]
+
+    try:
+        print("[INFO] Calling Converse API with Guardrails Contextual Grounding...")
+        
+        # 3. Converse APIの呼び出し
+        response = client.converse(
+            modelId=model_id,
+            messages=messages,
+            system=[{
+                "text": "あなたは正確な社内アシスタントです。提供された【参照ソース】に記載されている情報のみを使って回答してください。ソースにない情報は絶対に捏造しないでください。"
+            }],
+            inferenceConfig={
+                "maxTokens": 500,
+                "temperature": 0.0  # ハルシネーションを防ぐため低めに設定
+            },
+            # ガードレールの適用設定
+            guardrailConfig={
+                "guardrailIdentifier": guardrail_id,
+                "guardrailVersion": guardrail_version,
+                "trace": "enabled"  # 評価結果の詳細トレースを取得する場合に指定
+            }
+        )
+
+        # 4. レスポンスの判定と処理
+        stop_reason = response.get("stopReason")
+        
+        if stop_reason == "guardrail_intervened":
+            print("\n【ブロック】ガードレール（グラウンディング違反またはポリシー違反）により応答が遮断されました。")
+            # トレース情報からどのチェックに引っかかったかを確認可能
+            if "trace" in response:
+                print("Trace Details:", response["trace"])
+        else:
+            answer = response["output"]["message"]["content"][0]["text"]
+            print("\n【AI回答】\n", answer)
+
+    except ClientError as e:
+        print(f"[ERROR] AWS API Error: {e.response['Error']['Message']}")
+    except Exception as e:
+        print(f"[ERROR] Unexpected Error: {e}")
+
+if __name__ == "__main__":
+    secure_rag_inference()
