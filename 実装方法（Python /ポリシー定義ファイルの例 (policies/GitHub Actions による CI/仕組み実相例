@@ -1,0 +1,20 @@
+import asyncio
+import boto3
+from fastapi import FastAPI
+
+app = FastAPI()
+# boto3クライアントはスレッドセーフ
+bedrock_client = boto3.client("bedrock-runtime", region_name="us-east-1")
+
+def _sync_call_bedrock(prompt: str):
+    # 同期的な boto3 呼び出し
+    return bedrock_client.converse(
+        modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        messages=[{"role": "user", "content": [{"text": prompt}]}]
+    )
+
+@app.post("/chat")
+async def chat_endpoint(prompt: str):
+    # イベントループをブロックせず、スレッドプールで非同期実行
+    response = await asyncio.to_thread(_sync_call_bedrock, prompt)
+    return {"response": response["output"]["message"]["content"][0]["text"]}
