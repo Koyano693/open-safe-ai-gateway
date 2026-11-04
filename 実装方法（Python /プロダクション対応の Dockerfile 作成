@@ -1,0 +1,31 @@
+FROM python:3.10-slim
+
+# 必須のシステムパッケージ（Gitやビルドツールなど、一部の軽量NLPモデル依存用）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 依存関係のインストール
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 初回ビルド時にLLM Guardが使用する軽量モデル（判定用）をキャッシュさせるためのダミー実行や設定
+# ※必要に応じて前もってモデルをダウンロードさせるスクリプトを走らせることも可能
+
+COPY . .
+
+# 非特権ユーザーで実行するセキュリティベストプラクティス
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8080
+
+# 本番用：Gunicorn + Uvicornワーカーでマルチプロセス駆動させる場合
+# CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--workers", "2", "app.main:app"]
+
+# シンプルなUvicorn単体起動の場合
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
