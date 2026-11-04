@@ -1,0 +1,9 @@
+[ ユーザー / アプリケーション ]
+         │
+         ▼ (HTTPS / Port 443)
+【 ALB (Application Load Balancer) 】 (Public Subnet)
+         │
+         ▼ (AWS PrivateLink / Internal Port 8080)
+【 ECS Fargate タスク (FastAPI Gateway) 】 (Private Subnet)
+    ├── (VPC Endpoint) ──────► Amazon Bedrock (AWS Backbone)
+    └── (Port 6379) ─────────► Amazon ElastiCache / Redis (Private Subnet)
