@@ -1,0 +1,50 @@
+def search_similar_cache(user_query: str, top_k: int = 1, score_threshold: float = 0.85):
+    """
+    FT.SEARCH と KNN クエリを使用して、意味的に類似した過去の質問を検索する
+    """
+    index_name = "idx:rag_cache"
+    
+    # 1. ユーザーの質問をベクトル化
+    query_vector = embedder.encode(user_query).astype(np.float32).tobytes()
+
+    # 2. FT.SEARCH クエリの構築
+    # "*=>[KNN 1 @vector $vec AS score]" の構文でベクトル類似度の上位1件を取得
+    # DIALECT 2 は高度なクエリ構文を使用するために必須
+    query_string = f"*=>[KNN {top_k} @vector $vec AS score]"
+    
+    try:
+        results = redis_client.execute_command(
+            "FT.SEARCH", index_name,
+            query_string,
+            "PARAMS", "2", "vec", query_vector,
+            "SORTBY", "score",
+            "DIALECT", "2"
+        )
+
+        # 3. 検索結果のパース
+        # RediSearchの返却値構造: [総ヒット数, キー1, [フィールド, 値...], キー2, ...]
+        if not results or results[0] == 0:
+            return None
+
+        # 最初のヒット結果（results[1]がキー、results[2]がフィールドのリスト）
+        hit_key = results[1]
+        fields_list = results[2]
+        
+        # フィールドリストを辞書に変換
+        fields = {fields_list[i]: fields_list[i+1] for i in range(0, len(fields_list), 2)}
+        
+        distance = float(fields.get(b"score", 1.0))
+        # RedisのCOSINE距離は 0（完全に一致）〜 2（正反対）。類似度に換算する場合は 1 - (distance / 2) などを用いる
+        similarity = 1.0 - (distance / 2.0)
+
+        print(f"[DEBUG] Best match similarity score: {similarity:.4f}")
+
+        # 閾値（例: 0.85以上）を超えている場合のみキャッシュ（フォールバック）として採用
+        if similarity >= score_threshold:
+            return fields.get(b"answer").decode("utf-8")
+
+        return None
+
+    except Exception as e:
+        print(f"[ERROR] FT.SEARCH failed: {e}")
+        return None
