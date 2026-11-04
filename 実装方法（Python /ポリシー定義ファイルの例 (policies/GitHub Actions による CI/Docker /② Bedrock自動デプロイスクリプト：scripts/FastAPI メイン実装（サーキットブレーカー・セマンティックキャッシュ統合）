@@ -1,0 +1,68 @@
+import os
+import asyncio
+import boto3
+import redis
+import pybreaker
+from fastapi import FastAPI, HTTPException, Header, Depends
+from pydantic import BaseModel, Field
+
+app = FastAPI(title="Open Safe-AI Gateway", version="1.0.0")
+
+# Redis & サーキットブレーカーの設定
+redis_client = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+bedrock_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=20, name="BedrockBreaker")
+bedrock_client = boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", "us-east-1"))
+
+API_KEY = os.getenv("GATEWAY_API_KEY", "secure-token")
+
+def verify_api_key(x_api_key: str = Header(...)):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API Key")
+    return x_api_key
+
+class ChatRequest(BaseModel):
+    context: str = Field(..., description="RAGの参照ソース")
+    query: str = Field(..., description="ユーザーの質問")
+
+@bedrock_breaker
+def call_bedrock_converse(context: str, query: str):
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"text": f"以下の参照ソースに基づいて回答してください。\n\n[参照ソース]\n{context}", "qualifiers": ["GROUND"]},
+                {"text": f"[質問]\n{query}", "qualifiers": ["QUERY"]}
+            ]
+        }
+    ]
+    response = bedrock_client.converse(
+        modelId=os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
+        messages=messages,
+        guardrailConfig={
+            "guardrailIdentifier": os.getenv("BEDROCK_GUARDRAIL_ID"),
+            "guardrailVersion": os.getenv("BEDROCK_GUARDRAIL_VERSION", "1")
+        }
+    )
+    return response
+
+@app.post("/v1/chat/secure-rag")
+async def secure_rag_endpoint(request: ChatRequest, api_key: str = Depends(verify_api_key)):
+    try:
+        # サーキットブレーカー＆非同期スレッドプールでのBedrock呼び出し
+        response = await asyncio.to_thread(call_bedrock_converse, request.context, request.query)
+        
+        if response.get("stopReason") == "guardrail_intervened":
+            return {"status": "blocked", "reason": "Guardrail intervened due to policy or grounding check."}
+            
+        answer = response["output"]["message"]["content"][0]["text"]
+        return {"status": "success", "answer": answer}
+        
+    except pybreaker.CircuitBreakerError:
+        # フォールバック処理 (Redisキャッシュ等の参照)
+        return {
+            "status": "fallback",
+            "warning": "AWS service is currently busy (Circuit Breaker OPEN).",
+            "answer": "現在システムが混み合っております。一時的な保護モードが作動しています。"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
