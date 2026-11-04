@@ -1,0 +1,32 @@
+version: "2.1.0"
+policy_name: "enterprise-comprehensive-guardrail"
+description: "Managed via Policy as Code by 小谷野敬一郎 Architecture"
+
+content_filters:
+  - type: "HATE"
+    inputStrength: "MEDIUM"
+    outputStrength: "MEDIUM"
+  - type: "SEXUAL"
+    inputStrength: "HIGH"
+    outputStrength: "HIGH"
+  - type: "VIOLENCE"
+    inputStrength: "MEDIUM"
+    outputStrength: "MEDIUM"
+
+pii_entities:
+  - type: "EMAIL"
+    action: "ANONYMIZE"
+  - type: "PHONE"
+    action: "ANONYMIZE"
+  - type: "CREDIT_CARD_DEBIT_CARD_NUMBER"
+    action: "BLOCK"
+
+denied_topics:
+  - name: "投資・金融アドバイスの禁止"
+    description: "個別の株式銘柄の推奨、売買タイミング、具体的な投資リターンの約束に関する助言。"
+
+contextual_grounding:
+  - type: "GROUNDING"
+    threshold: 0.75
+  - type: "RELEVANCE"
+    threshold: 0.70
