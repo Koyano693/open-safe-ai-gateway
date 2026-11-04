@@ -1,0 +1,36 @@
+from llm_guard import scan_prompt, scan_output
+from llm_guard.input_scanners import Anonymize, PromptInjection, Toxicity
+from llm_guard.output_scanners import NoRefusal, Relevance
+
+# 1. 入力用スキャナーの定義
+input_scanners = [
+    Anonymize(),         # メールアドレス、電話番号、氏名などのPIIを検出・マスク
+    PromptInjection(),   # 脱獄・システム命令乗っ取りの検知
+    Toxicity()           # 攻撃的・有害な表現の検知
+]
+
+# 2. 出力用スキャナーの定義
+output_scanners = [
+    NoRefusal(),         # 不当な拒絶応答のチェック
+    Relevance()          # 質問に対する適切な回答かどうかの検証
+]
+
+def process_input_guard(prompt: str):
+    """ユーザーからの入力をスキャンし、安全化（PIIマスク等）されたプロンプトを返す"""
+    sanitized_prompt, results_valid, results_score = scan_prompt(input_scanners, prompt)
+    
+    # いずれかのスキャナーで規程違反（False）と判定された場合
+    if not all(results_valid.values()):
+        failed_scanners = [k for k, v in results_valid.items() if not v]
+        return False, f"Input validation failed by security guards: {failed_scanners}", None
+        
+    return True, "Success", sanitized_prompt
+
+def process_output_guard(prompt: str, response_text: str):
+    """LLMからの出力をスキャンし、安全性を確認する"""
+    sanitized_response, results_valid, results_score = scan_output(output_scanners, prompt, response_text)
+    
+    if not all(results_valid.values()):
+        return False, "Output validation failed: Unsafe or irrelevant response detected."
+        
+    return True, sanitized_response
