@@ -1,0 +1,66 @@
+import os
+from fastapi import FastAPI, HTTPException, Header, Depends
+from pydantic import BaseModel
+from openai import OpenAI
+from app.gateway import process_input_guard, process_output_guard
+
+app = FastAPI(
+    title="Secure AI Gateway with LLM Guard",
+    description="社内向けAIプロキシ：自動PIIマスクおよびプロンプトインジェクション防御",
+    version="1.0.0"
+)
+
+# 簡易的な社内APIキー認証
+API_KEY = os.getenv("GATEWAY_API_KEY", "internal-secret-token")
+
+def verify_api_key(x_api_key: str = Header(...)):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid or missing API Key")
+    return x_api_key
+
+class ChatRequest(BaseModel):
+    prompt: str
+    model: str = "gpt-4o-mini"
+
+# OpenAIクライアント（環境変数からキーを取得）
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+@app.post("/v1/chat/secure-completions")
+def secure_chat(request: ChatRequest, api_key: str = Depends(verify_api_key)):
+    # ── Step 1: LLM Guard による入力検査 & マスキング ──
+    is_safe, message, safe_prompt = process_input_guard(request.prompt)
+    if not is_safe:
+        raise HTTPException(
+            status_code=400, 
+            detail={"error": "Blocked by Input Guardrail", "reason": message}
+        )
+    
+    try:
+        # ── Step 2: 実際の LLM API への問い合わせ ──
+        # （安全化され、PIIが隠蔽された safe_prompt をLLMに渡す）
+        response = client.chat.completions.create(
+            model=request.model,
+            messages=[{"role": "user", "content": safe_prompt}]
+        )
+        raw_output = response.choices[0].message.content
+
+        # ── Step 3: LLM Guard による出力検査 ──
+        is_output_safe, checked_output = process_output_guard(safe_prompt, raw_output)
+        if not is_output_safe:
+            raise HTTPException(
+                status_code=500, 
+                detail={"error": "Blocked by Output Guardrail", "reason": checked_output}
+            )
+
+        return {
+            "status": "success",
+            "sanitized_input_used": safe_prompt,
+            "response": checked_output
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy", "service": "llm-guard-gateway"}
