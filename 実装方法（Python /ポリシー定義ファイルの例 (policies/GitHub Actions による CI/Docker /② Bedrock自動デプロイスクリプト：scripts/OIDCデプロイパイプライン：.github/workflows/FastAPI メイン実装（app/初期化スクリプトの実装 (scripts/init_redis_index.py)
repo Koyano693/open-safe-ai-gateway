@@ -1,0 +1,66 @@
+import os
+import sys
+import redis
+from redis.exceptions import ResponseError
+
+# Redis接続情報の取得
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+INDEX_NAME = "idx:rag_cache"
+DOC_PREFIX = "cache:query:"
+
+def init_redis_search_index():
+    """
+    RediSearch のインデックス構造を自動チェックし、未作成の場合は初期化構築する
+    """
+    r = redis.Redis.from_url(REDIS_URL)
+    
+    try:
+        # 1. 接続確認
+        r.ping()
+        print(f"[INFO] Connected to Redis at {REDIS_URL}")
+    except redis.ConnectionError as e:
+        print(f"[ERROR] Could not connect to Redis: {e}")
+        sys.exit(1)
+
+    try:
+        # 2. インデックスの存在確認 (FT.INFO)
+        r.execute_command(f"FT.INFO {INDEX_NAME}")
+        print(f"[INFO] RediSearch index '{INDEX_NAME}' already exists. Skipping creation.")
+        return True
+    except ResponseError as e:
+        # インデックスが存在しない場合は ResponseError が発生するため、作成処理へ移行
+        if "Unknown Index name" not in str(e) and "Index does not exist" not in str(e):
+            print(f"[ERROR] Unexpected Redis error: {e}")
+            sys.exit(1)
+
+    # 3. FT.CREATE によるインデックス構築
+    print(f"[INFO] Index '{INDEX_NAME}' not found. Creating new RediSearch HNSW index...")
+    
+    try:
+        # SCHEMA 定義:
+        # - query  : 検索キーワード用のTEXTフィールド
+        # - answer : キャッシュ回答用のTEXTフィールド
+        # - vector : HNSWアルゴリズムに基づく384次元のVECTORフィールド (FLOAT32, COSINE距離)
+        r.execute_command(
+            "FT.CREATE", INDEX_NAME,
+            "ON", "HASH",
+            "PREFIX", "1", DOC_PREFIX,
+            "SCHEMA",
+            "query", "TEXT",
+            "answer", "TEXT",
+            "vector", "VECTOR", "HNSW", "10",  # HNSWパラメータ数の指定 (10個の引数)
+                "TYPE", "FLOAT32",
+                "DIM", "384",
+                "DISTANCE_METRIC", "COSINE",
+                "M", "16",                    # 1ノードあたりの最大双方向リンク数 (標準: 16)
+                "EF_CONSTRUCTION", "200"     # インデックス構築時の探索候補数 (精度重視: 200)
+        )
+        print(f"[SUCCESS] RediSearch index '{INDEX_NAME}' created successfully with HNSW vector support!")
+        return True
+        
+    except ResponseError as create_err:
+        print(f"[ERROR] Failed to create RediSearch index: {create_err}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    init_redis_search_index()
