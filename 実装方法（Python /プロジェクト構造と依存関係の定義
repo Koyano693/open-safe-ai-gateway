@@ -1,0 +1,8 @@
+llm-gateway/
+├── app/
+│   ├── __init__.py
+│   ├── main.py          # FastAPI エンドポイント
+│   └── gateway.py       # LLM Guard 連携ロジック
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
