@@ -1,0 +1,72 @@
+import os
+import sys
+import yaml
+import boto3
+from botocore.exceptions import ClientError
+
+def load_policy_yaml(file_path: str) -> dict:
+    """YAMLファイルからポリシー定義を読み込む"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f)
+    except Exception as e:
+        print(f"[ERROR] Failed to load policy file {file_path}: {e}")
+        sys.exit(1)
+
+def deploy_guardrail():
+    # 環境変数から設定値を取得
+    guardrail_id = os.environ.get("BEDROCK_GUARDRAIL_ID")
+    aws_region = os.environ.get("AWS_REGION", "us-east-1")
+    
+    if not guardrail_id:
+        print("[ERROR] BEDROCK_GUARDRAIL_ID environment variable is missing.")
+        sys.exit(1)
+
+    # ポリシーファイルの読み込み
+    policy_path = "policies/denied-topics.yaml"
+    policy_data = load_policy_yaml(policy_path)
+
+    # Bedrockクライアントの初期化（bedrock, 静的なコントロールプレーン用）
+    client = boto3.client("bedrock", region_name=aws_region)
+
+    # 1. 拒否トピックの設定をBoto3の仕様にマッピング
+    topics_config = []
+    for topic in policy_data.get("denied_topics", []):
+        topics_config.append({
+            "name": topic["name"],
+            "definition": topic["description"],
+            "examples": topic.get("examples", ["関連するプロンプト例がありません"]),
+            "type": "DENY"
+        })
+
+    try:
+        print(f"[INFO] Updating Bedrock Guardrail ID: {guardrail_id} ...")
+        
+        # 2. Guardrails本体の更新
+        response = client.update_guardrail(
+            guardrailIdentifier=guardrail_id,
+            name=policy_data.get("policy_name", "enterprise-governance-guardrail"),
+            description="Managed by Policy as Code (GitHub Actions)",
+            topicPolicyConfig={
+                "topicsConfig": topics_config
+            },
+            blockedInputMessaging="このリクエストはセキュリティポリシーによりブロックされました。",
+            blockedOutputsMessaging="生成された応答はセキュリティポリシーによりブロックされました。"
+        )
+        print("[SUCCESS] Guardrail updated successfully.")
+
+        # 3. 本番反映のために新しいバージョンを発行する
+        print("[INFO] Creating a new guardrail version...")
+        version_response = client.create_guardrail_version(
+            guardrailIdentifier=guardrail_id,
+            description="Auto-deployed via GitHub Actions CI/CD"
+        )
+        version = version_response.get("version")
+        print(f"[SUCCESS] New Guardrail version created: {version}")
+
+    except ClientError as e:
+        print(f"[ERROR] AWS API Error: {e.response['Error']['Message']}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    deploy_guardrail()
