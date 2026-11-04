@@ -1,0 +1,122 @@
+import os
+import asyncio
+import redis
+import boto3
+import pybreaker
+from botocore.exceptions import ClientError
+from fastapi import FastAPI, HTTPException
+from sentence_transformers import SentenceTransformer
+
+app = FastAPI(title="Semantic Cache & Fallback AI Gateway")
+
+# 1. Redis クライアントの初期化 (ベクトル検索をサポートするRedis Stack想定)
+# 接続文字列例: redis://localhost:6379
+redis_client = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+
+# 2. 軽量な埋め込みモデル（文章をベクトルに変換するモデル）のロード
+# ローカルで高速に動作する小型モデルを使用
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
+# 3. サーキットブレーカーの定義
+bedrock_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=20, name="BedrockBreaker")
+bedrock_client = boto3.client("bedrock-runtime", region_name="us-east-1")
+
+def get_embedding(text: str) -> list[float]:
+    """テキストをベクトルに変換する"""
+    vector = embedder.encode(text)
+    return vector.tolist()
+
+def search_semantic_cache(query: str, threshold: float = 0.85) -> str | None:
+    """
+    Redisなどのベクトルストアから、過去の類似した質問と回答を検索する（簡易セマンティックキャッシュ）
+    """
+    try:
+        query_vector = get_embedding(query)
+        
+        # 簡易的な検索ロジックのイメージ：
+        # Redisのハッシュやベクトルインデックスから最も類似度の高いものを探索
+        # （本番環境では Redisearch の VECTOR SIMILARITY クエリを使用）
+        keys = redis_client.keys("cache:query:*")
+        best_match = None
+        highest_score = 0.0
+
+        for key in keys:
+            stored_vector = list(map(float, redis_client.hgetall(key)[b"vector"].decode().split(",")))
+            # コサイン類似度の計算（簡易版）
+            import numpy as np
+            score = np.dot(query_vector, stored_vector) / (np.linalg.norm(query_vector) * np.linalg.norm(stored_vector))
+            
+            if score > highest_score:
+                highest_score = score
+                best_match = key
+
+        # 類似度が閾値（例: 0.85以上）を超えていれば、キャッシュされた回答を返す
+        if highest_score >= threshold and best_match:
+            cached_answer = redis_client.hget(best_match, "answer").decode("utf-8")
+            return cached_answer
+            
+        return None
+    except Exception as e:
+        print(f"[WARNING] Semantic cache search failed: {e}")
+        return None
+
+def save_to_semantic_cache(query: str, answer: str):
+    """正常時のやり取りをベクトルとともにキャッシュに保存する"""
+    try:
+        vector = get_embedding(query)
+        vector_str = ",".join(map(str, vector))
+        
+        key = f"cache:query:{hash(query)}"
+        redis_client.hset(key, mapping={
+            "query": query,
+            "answer": answer,
+            "vector": vector_str
+        })
+        # キャッシュの有効期限（例: 24時間）
+        redis_client.expire(key, 86400)
+    except Exception as e:
+        print(f"[WARNING] Failed to save cache: {e}")
+
+@bedrock_breaker
+def call_bedrock(prompt: str):
+    """Bedrock呼び出し（サーキットブレーカー保護）"""
+    response = bedrock_client.converse(
+        modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        messages=[{"role": "user", "content": [{"text": prompt}]}]
+    )
+    return response["output"]["message"]["content"][0]["text"]
+
+@app.post("/v1/chat/fallback-rag")
+async def fallback_rag_endpoint(prompt: str):
+    try:
+        # ── 【通常経路】 サーキットブレーカー経由でBedrockを呼び出し ──
+        answer = await asyncio.to_thread(call_bedrock, prompt)
+        
+        # 成功したら、次回のフォールバック用にRedisへキャッシュ保存
+        asyncio.create_task(asyncio.to_thread(save_to_semantic_cache, prompt, answer))
+        
+        return {
+            "status": "success",
+            "source": "live_bedrock",
+            "answer": answer
+        }
+        
+    except (pybreaker.CircuitBreakerError, ClientError) as e:
+        # ── 【フォールバック発動】 AWS障害またはスロットリング時 ──
+        print("[INFO] AWS throttling or outage detected. Searching semantic cache...")
+        
+        # Redis / ベクトルDBから類似する過去の回答を探索
+        fallback_answer = await asyncio.to_thread(search_semantic_cache, prompt)
+        
+        if fallback_answer:
+            return {
+                "status": "fallback_success",
+                "source": "redis_semantic_cache",
+                "warning": "AWS側が一時的に混雑しているため、過去の類似回答を提示しています。",
+                "answer": fallback_answer
+            }
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail="AWS service is busy and no similar cached response is available."
+            )
