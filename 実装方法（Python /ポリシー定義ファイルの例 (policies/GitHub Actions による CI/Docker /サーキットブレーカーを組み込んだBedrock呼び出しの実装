@@ -1,0 +1,62 @@
+import os
+import time
+import boto3
+import pybreaker
+from botocore.exceptions import ClientError
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI(title="Circuit Breaker AI Gateway")
+
+# 1. サーキットブレーカーの定義
+# 失敗が「5回」連続したらオープンし、「30秒間」はリクエストを遮断する
+bedrock_breaker = pybreaker.CircuitBreaker(
+    fail_max=5,
+    reset_timeout=30,
+    name="BedrockCircuitBreaker"
+)
+
+bedrock_client = boto3.client("bedrock-runtime", region_name="us-east-1")
+
+@bedrock_breaker
+def call_bedrock_safely(prompt: str):
+    """
+    pybreakerのデコレータで保護された同期Bedrock呼び出し関数。
+    エラー（Throttling等）が連続すると自動でブレーカーが作動（Open）します。
+    """
+    try:
+        response = bedrock_client.converse(
+            modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+            messages=[{"role": "user", "content": [{"text": prompt}]}]
+        )
+        return response["output"]["message"]["content"][0]["text"]
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        # スロットリングやサービス障害時は例外を送出してブレーカーに検知させる
+        if error_code in ["ThrottlingException", "TooManyRequestsException", "InternalServerException"]:
+            raise e
+        # 400 Bad Requestなどのクライアントエラーはブレーカーの「故障」とみなさない場合もある
+        raise e
+
+@app.post("/v1/chat/resilient-rag")
+async def resilient_rag_endpoint(prompt: str):
+    try:
+        # サーキットブレーカー経由で実行
+        # BreakerがOpen状態のときは、Bedrockを叩かずに即座に pybreaker.CircuitBreakerError が発生する
+        answer = call_bedrock_safely(prompt)
+        return {
+            "status": "success",
+            "source": "bedrock",
+            "answer": answer
+        }
+        
+    except pybreaker.CircuitBreakerError:
+        # ── 【フォールバック応答】 ──
+        # AWS側が混雑している、または障害中のため、即座に代替応答を返す
+        return {
+            "status": "fallback",
+            "source": "cache_or_graceful_degradation",
+            "answer": "現在、AIシステム側が大変混み合っております（一時的な保護モード作動中）。数秒後に再度お試しいただくか、キャッシュされた情報をご参照ください。",
+            "circuit_breaker_state": "OPEN"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gateway Error: {str(e)}")
