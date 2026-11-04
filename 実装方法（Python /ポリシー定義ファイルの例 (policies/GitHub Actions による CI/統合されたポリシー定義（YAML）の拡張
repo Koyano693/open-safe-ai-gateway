@@ -1,0 +1,31 @@
+version: "2.1.0"
+policy_name: "enterprise-comprehensive-guardrail"
+description: "PII, Content filters, Denied topics, and Contextual Grounding managed by PaC"
+
+# 1. 有害表現フィルター
+content_filters:
+  - type: "HATE"
+    inputStrength: "MEDIUM"
+    outputStrength: "MEDIUM"
+  - type: "SEXUAL"
+    inputStrength: "HIGH"
+    outputStrength: "HIGH"
+
+# 2. 個人情報（PII）マスク設定
+pii_entities:
+  - type: "EMAIL"
+    action: "ANONYMIZE"
+  - type: "PHONE"
+    action: "ANONYMIZE"
+
+# 3. 拒否トピック
+denied_topics:
+  - name: "投資・金融アドバイスの禁止"
+    description: "個別の株式銘柄の推奨や具体的な投資リターンの約束に関する助言。"
+
+# 4. コンテキストグラウンディング（RAGハルシネーション・関連性チェック）
+contextual_grounding:
+  - type: "GROUNDING"
+    threshold: 0.75  # 参照ソースに対する事実性の閾値（0.75未満はブロック）
+  - type: "RELEVANCE"
+    threshold: 0.70  # ユーザーの質問に対する関連性の閾値（0.70未満はブロック）
