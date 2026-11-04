@@ -1,0 +1,25 @@
+variable "aws_region" {
+  type    = string
+  default = "us-east-1"
+}
+
+variable "project_name" {
+  type    = string
+  default = "safe-ai-gateway"
+}
+
+variable "environment" {
+  type    = string
+  default = "prod"
+}
+
+variable "container_image" {
+  description = "ECRコンテナイメージのURI"
+  type        = string
+  default     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/safe-ai-gateway:latest"
+}
+
+variable "bedrock_guardrail_id" {
+  type    = string
+  default = "your-guardrail-id-xxx"
+}
