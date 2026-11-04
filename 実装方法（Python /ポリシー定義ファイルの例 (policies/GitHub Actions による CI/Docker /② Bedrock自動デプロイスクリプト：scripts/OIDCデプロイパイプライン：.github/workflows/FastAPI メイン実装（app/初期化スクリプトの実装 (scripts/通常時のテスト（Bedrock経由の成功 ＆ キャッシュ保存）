@@ -1,0 +1,7 @@
+curl -X POST "$GATEWAY_URL" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "context": "社内規定: 当社の有給休暇は年間20日まで付与され、前年度からの繰越は最大10日まで可能です。",
+    "query": "有給休暇は何日まで繰り越せますか？"
+  }'
