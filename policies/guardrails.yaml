@@ -1,0 +1,24 @@
+version: "1.0"
+name: safe-ai-enterprise-policy
+description: Core governance policy for Safe-AI Gateway
+
+content_filters:
+  - category: HATE_SPEECH
+    strength: HIGH
+  - category: VIOLENCE
+    strength: HIGH
+  - category: SEXUAL
+    strength: HIGH
+
+pii_masking:
+  - type: EMAIL
+    action: ANONYMIZE
+  - type: PHONE_NUMBER
+    action: ANONYMIZE
+  - type: CREDIT_CARD
+    action: BLOCK
+
+grounding_policy:
+  enabled: true
+  threshold: 0.80
+  fallback_behavior: BLOCK_OR_CACHE
