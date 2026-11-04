@@ -1,0 +1,14 @@
+@app.post("/v1/chat/secure-rag")
+async def secure_rag_endpoint(request: RAGRequest):
+    # tenacityで保護された同期関数を非同期スレッドプールで実行
+    try:
+        response = await asyncio.to_thread(
+            invoke_bedrock_with_backoff,
+            client=bedrock_client,
+            model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
+            messages=...,
+            guardrail_config=...
+        )
+        return {"status": "success", "data": response}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Bedrock service temporarily unavailable after retries: {str(e)}")
