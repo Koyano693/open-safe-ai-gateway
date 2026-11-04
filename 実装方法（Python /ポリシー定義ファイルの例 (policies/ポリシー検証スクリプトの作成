@@ -1,0 +1,30 @@
+import sys
+import yaml
+from pathlib import Path
+
+def validate_yaml(file_path: Path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+        print(f"[OK] Syntax valid: {file_path}")
+        
+        # 必須キーのチェック例
+        if "version" not in data or "denied_topics" not in data:
+            print(f"[ERROR] Missing required keys in {file_path}")
+            return False
+        return True
+    except Exception as e:
+        print(f"[ERROR] Invalid YAML syntax in {file_path}: {e}")
+        return False
+
+if __name__ == "__main__":
+    policy_dir = Path("policies")
+    all_valid = True
+    
+    for policy_file in policy_dir.glob("*.yaml"):
+        if not validate_yaml(policy_file):
+            all_valid = False
+            
+    if not all_valid:
+        sys.exit(1) # テスト失敗としてCIを停止させる
+    print("[SUCCESS] All policy files passed validation.")
