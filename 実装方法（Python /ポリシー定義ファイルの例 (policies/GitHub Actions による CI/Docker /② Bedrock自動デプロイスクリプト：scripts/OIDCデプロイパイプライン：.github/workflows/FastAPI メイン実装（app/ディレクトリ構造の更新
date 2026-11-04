@@ -1,0 +1,8 @@
+secure-ai-gateway/
+├── app/
+│   ├── main.py
+│   └── bedrock_service.py
+├── scripts/
+│   └── init_redis_index.py  # ← 今回作成するインデックス自動初期化スクリプト
+├── docker-compose.yml
+└── requirements.txt
