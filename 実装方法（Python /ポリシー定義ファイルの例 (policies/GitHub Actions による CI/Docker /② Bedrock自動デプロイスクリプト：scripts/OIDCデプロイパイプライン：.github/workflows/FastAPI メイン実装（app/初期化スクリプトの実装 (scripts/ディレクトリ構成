@@ -1,0 +1,9 @@
+secure-ai-gateway/
+├── app/
+│   ├── __init__.py
+│   └── main.py
+├── tests/
+│   ├── __init__.py
+│   └── test_gateway.py  # ← 今回作成するテストコード
+├── requirements.txt
+└── pytest.ini
