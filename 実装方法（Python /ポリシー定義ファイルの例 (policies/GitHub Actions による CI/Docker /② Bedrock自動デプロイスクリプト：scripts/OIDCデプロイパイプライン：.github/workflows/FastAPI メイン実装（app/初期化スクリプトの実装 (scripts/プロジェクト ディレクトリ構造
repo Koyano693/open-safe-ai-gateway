@@ -1,0 +1,10 @@
+secure-ai-gateway/
+├── app/
+│   ├── __init__.py
+│   └── main.py              # FastAPI本体 (lifespanで初期化実行)
+├── scripts/
+│   ├── __init__.py
+│   └── init_redis_index.py  # Redisインデックス初期化スクリプト
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
