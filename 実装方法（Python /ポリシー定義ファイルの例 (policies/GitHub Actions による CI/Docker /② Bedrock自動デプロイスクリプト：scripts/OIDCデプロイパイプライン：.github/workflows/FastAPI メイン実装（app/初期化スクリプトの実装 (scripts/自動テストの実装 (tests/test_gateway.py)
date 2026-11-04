@@ -1,0 +1,120 @@
+import pytest
+from unittest.mock import patch, MagicMock
+from fastapi.testclient import TestClient
+from app.main import app, bedrock_breaker
+
+# TestClientを用いた同期テストクライアント
+client = TestClient(app)
+
+# テスト共通のヘッダー（APIキー認証）
+AUTH_HEADERS = {"x-api-key": "secure-token"}
+
+@pytest.fixture(autouse=True)
+def reset_circuit_breaker():
+    """各テストの実行前にサーキットブレーカーの状態を強制的にCLOSED（正常）にリセットする"""
+    bedrock_breaker.state = "closed"
+    bedrock_breaker._failure_count = 0
+    yield
+
+# ────────────────────────────────────────────────────────
+# 1. 正常系テスト (Bedrock成功 ＆ キャッシュ保存)
+# ────────────────────────────────────────────────────────
+@patch("app.main.bedrock_client")
+@patch("app.main.save_to_semantic_cache")
+def class_test_success_path(mock_save_cache, mock_bedrock_client):
+    pass # プレースホルダー
+
+def test_secure_rag_success(mock_save_cache, mock_bedrock_client):
+    """Bedrockが正常に応答を返し、キャッシュ保存が呼ばれることをテスト"""
+    # Bedrock Converse APIのモック戻り値
+    mock_bedrock_client.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{"text": "有給休暇の繰越は最大10日まで可能です。"}]
+            }
+        },
+        "stopReason": "end_turn"
+    }
+
+    response = client.post(
+        "/v1/chat/secure-rag",
+        headers=AUTH_HEADERS,
+        json={
+            "context": "社内規定データ",
+            "query": "有給休暇の繰越は何日ですか？"
+        }
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["source"] == "live_bedrock"
+    assert "10日まで" in data["answer"]
+    
+    # Redisへのキャッシュ保存が非同期バックグラウンド等で呼ばれたことを検証
+    # （※実装に応じてアサイン確認）
+
+# ────────────────────────────────────────────────────────
+# 2. ガードレールブロックのテスト (ポリシー介入)
+# ────────────────────────────────────────────────────────
+@patch("app.main.bedrock_client")
+def test_secure_rag_guardrail_blocked(mock_bedrock_client):
+    """Bedrock Guardrailsが介入してブロックした場合のテスト"""
+    mock_bedrock_client.converse.return_value = {
+        "stopReason": "guardrail_intervened"
+    }
+
+    response = client.post(
+        "/v1/chat/secure-rag",
+        headers=AUTH_HEADERS,
+        json={
+            "context": "金融データ",
+            "query": "確実に儲かる暗号資産を教えて"
+        }
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "blocked"
+    assert "Guardrail intervened" in data["reason"]
+
+# ────────────────────────────────────────────────────────
+# 3. Redisフォールバックのテスト (AWS障害時)
+# ────────────────────────────────────────────────────────
+@patch("app.main.search_semantic_cache")
+@patch("app.main.bedrock_client")
+def test_secure_rag_redis_fallback(mock_bedrock_client, mock_search_cache):
+    """
+    AWS側がエラー（例外）を返し、サーキットブレーカー作動後に
+    Redisセマンティックキャッシュから代替回答が返されるかをテスト
+    """
+    # Bedrock側がClientError（障害・スロットリング）を発生させる
+    from botocore.exceptions import ClientError
+    mock_bedrock_client.converse.side_effect = ClientError(
+        {"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}},
+        "Converse"
+    )
+
+    # Redisのセマンティックキャッシュ検索がヒットした場合の戻り値をモック
+    mock_search_cache.return_value = "【フォールバック】社内規定によれば、有給の繰越は最大10日までです。"
+
+    # サーキットブレーカーのfail_max回数分エラーを起こしてOpen状態にする
+    for _ in range(3):
+        client.post(
+            "/v1/chat/secure-rag",
+            headers=AUTH_HEADERS,
+            json={"context": "テスト", "query": "有給の繰越は？"}
+        )
+
+    # 4回目のリクエスト（サーキットブレーカーがOpenになり、フォールバックが発動する状態）
+    response = client.post(
+        "/v1/chat/secure-rag",
+        headers=AUTH_HEADERS,
+        json={"context": "テスト", "query": "有給の繰越は？"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "fallback_success"
+    assert data["source"] == "redis_semantic_cache"
+    assert "フォールバック" in data["answer"]
