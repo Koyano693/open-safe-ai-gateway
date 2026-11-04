@@ -1,0 +1,16 @@
+import asyncio
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+# 同時にBedrockを叩ける最大リクエスト数を「30」に制限
+CONCURRENCY_LIMIT = 30
+semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
+
+@app.post("/chat-limited")
+async def controlled_chat(prompt: str):
+    if semaphore.locked() and not semaphore._waiters:
+        raise HTTPException(status_code=429, detail="Gateway is busy. Please try again later.")
+
+    async with semaphore:
+        response = await asyncio.to_thread(_sync_call_bedrock, prompt)
+        return {"response": response}
