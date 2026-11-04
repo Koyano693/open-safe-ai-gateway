@@ -1,0 +1,7 @@
+version: "1.0.0"
+policy_name: "enterprise-security-baseline"
+denied_topics:
+  - name: "投資・金融アドバイスの禁止"
+    description: "個別の株式銘柄の推奨、売買のタイミング、具体的な投資リターンの約束に関する助言。"
+  - name: "社外秘情報の開示禁止"
+    description: "未発表の財務データ、インサイダー情報、従業員の個人特定情報。"
