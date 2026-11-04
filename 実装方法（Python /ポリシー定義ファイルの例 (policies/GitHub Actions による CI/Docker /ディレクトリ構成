@@ -1,0 +1,15 @@
+secure-ai-gateway/
+├── app/
+│   ├── __init__.py
+│   ├── main.py              # FastAPI エンドポイント (非同期 & サーキットブレーカー統合)
+│   └── bedrock_service.py   # Bedrock Converse API + グラウンディングチェック & tenacity リトライ
+├── policies/
+│   └── guardrail-config.yaml # PIIマスク、有害表現、拒否トピック、グラウンディングの統合定義
+├── scripts/
+│   └── deploy_to_bedrock.py  # YAMLを読み込みBedrockへ一括反映＆バージョン発行するスクリプト
+├── .github/
+│   └── workflows/
+│       └── deploy-policy.yml # GitHub OIDC認証を用いた自動デプロイパイプライン
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
