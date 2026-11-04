@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  async-rag-gateway:
+    build: .
+    container_name: async-secure-rag-gateway
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=your-aws-access-key
+      - AWS_SECRET_ACCESS_KEY=your-aws-secret-key
+      - BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
+      - BEDROCK_GUARDRAIL_ID=your-guardrail-id-xxx
+      - BEDROCK_GUARDRAIL_VERSION=1
+      - GATEWAY_API_KEY=your-secure-internal-token
