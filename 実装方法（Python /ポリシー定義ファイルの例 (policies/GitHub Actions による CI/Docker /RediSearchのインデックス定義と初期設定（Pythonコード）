@@ -1,0 +1,47 @@
+import os
+import redis
+from sentence_transformers import SentenceTransformer
+
+# 1. Redis 接続 (Redis Stack または RediSearch有効なRedis)
+redis_client = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+
+# 2. 埋め込みモデルのロード (384次元)
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
+def create_search_index():
+    """
+    RediSearch のインデックスを作成する (存在しない場合のみ)
+    """
+    index_name = "idx:rag_cache"
+    prefix = "cache:query:"
+
+    try:
+        # 既存のインデックスがあるか確認
+        redis_client.execute_command(f"FT.INFO {index_name}")
+        print("[INFO] Index already exists.")
+    except redis.exceptions.ResponseError:
+        print("[INFO] Creating new RediSearch index...")
+        
+        # FT.CREATE コマンドの実行
+        # - HASH: ハッシュ構造のデータを対象にする
+        # - PREFIX: 指定したプレフィックスのキーをインデックス化する
+        # - VECTOR HNSW: 近似近傍探索(HNSW)インデックスを設定
+        #   - TYPE FLOAT32: データの型
+        #   - DIM 384: ベクトルの次元数
+        #   - DISTANCE_COSINE: 類似度計算のメトリクス（コサイン類似度）
+        redis_client.execute_command(
+            "FT.CREATE", index_name,
+            "ON", "HASH",
+            "PREFIX", "1", prefix,
+            "SCHEMA",
+            "query", "TEXT",                   # 質問テキスト（キーワード検索用）
+            "answer", "TEXT",                  # 回答テキスト
+            "vector", "VECTOR", "HNSW", "6",   # HNSWインデックスのパラメータ (M=16等)
+            "TYPE", "FLOAT32",
+            "DIM", "384",
+            "DISTANCE_METRIC", "COSINE"
+        )
+        print("[SUCCESS] RediSearch index created successfully.")
+
+if __name__ == "__main__":
+    create_search_index()
