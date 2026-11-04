@@ -1,0 +1,150 @@
+import os
+import asyncio
+import numpy as np
+import redis
+import boto3
+import pybreaker
+from fastapi import FastAPI, HTTPException, Header, Depends
+from pydantic import BaseModel, Field
+from sentence_transformers import SentenceTransformer
+
+app = FastAPI(title="Open Safe-AI Gateway with Semantic Cache & Fallback", version="2.0.0")
+
+# 1. 外部クライアントおよびモデルの初期化
+redis_client = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+# 軽量・高速なローカル埋め込みモデル (384次元)
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
+bedrock_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=20, name="BedrockBreaker")
+bedrock_client = boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", "us-east-1"))
+
+API_KEY = os.getenv("GATEWAY_API_KEY", "secure-token")
+
+def verify_api_key(x_api_key: str = Header(...)):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API Key")
+    return x_api_key
+
+class ChatRequest(BaseModel):
+    context: str = Field(..., description="RAGの参照ソース")
+    query: str = Field(..., description="ユーザーの質問")
+
+def get_embedding(text: str) -> bytes:
+    """テキストを384次元ベクトルに変換し、Redis検索用にバイナリ化する"""
+    vector = embedder.encode(text).astype(np.float32)
+    return vector.tobytes()
+
+def search_semantic_cache(query: str, similarity_threshold: float = 0.85) -> str | None:
+    """
+    RediSearch の FT.SEARCH (KNNクエリ) を用いて過去の類似回答を高速検索する
+    """
+    index_name = "idx:rag_cache"
+    query_vector = get_embedding(query)
+    
+    # KNNクエリ: 上位1件の類似ベクトルを検索
+    query_string = f"*=>[KNN 1 @vector $vec AS score]"
+    
+    try:
+        results = redis_client.execute_command(
+            "FT.SEARCH", index_name,
+            query_string,
+            "PARAMS", "2", "vec", query_vector,
+            "SORTBY", "score",
+            "DIALECT", "2"
+        )
+        
+        if not results or results[0] == 0:
+            return None
+
+        # 検索結果のパース
+        hit_key = results[1]
+        fields_list = results[2]
+        fields = {fields_list[i]: fields_list[i+1] for i in range(0, len(fields_list), 2)}
+        
+        # RediSearchのCOSINE距離を類似度に換算 (Similarity = 1 - (Distance / 2))
+        distance = float(fields.get(b"score", 1.0))
+        similarity = 1.0 - (distance / 2.0)
+
+        print(f"[DEBUG] Semantic Cache Hit Check - Similarity: {similarity:.4f}")
+
+        if similarity >= similarity_threshold:
+            return fields.get(b"answer").decode("utf-8")
+            
+        return None
+    except Exception as e:
+        print(f"[WARNING] Semantic cache search failed: {e}")
+        return None
+
+def save_to_semantic_cache(doc_id: str, query: str, answer: str):
+    """正常時のやり取りをベクトルとともにRediSearchへ保存する"""
+    try:
+        vector_bytes = get_embedding(query)
+        key = f"cache:query:{doc_id}"
+        
+        redis_client.hset(key, mapping={
+            "query": query,
+            "answer": answer,
+            "vector": vector_bytes
+        })
+        # キャッシュの有効期限（例: 24時間）
+        redis_client.expire(key, 86400)
+    except Exception as e:
+        print(f"[WARNING] Failed to save semantic cache: {e}")
+
+@bedrock_breaker
+def call_bedrock_converse(context: str, query: str):
+    """Bedrock Converse API 呼び出し（サーキットブレーカー保護）"""
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"text": f"以下の参照ソースに基づいて回答してください。\n\n[参照ソース]\n{context}", "qualifiers": ["GROUND"]},
+                {"text": f"[質問]\n{query}", "qualifiers": ["QUERY"]}
+            ]
+        }
+    ]
+    response = bedrock_client.converse(
+        modelId=os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
+        messages=messages,
+        guardrailConfig={
+            "guardrailIdentifier": os.getenv("BEDROCK_GUARDRAIL_ID"),
+            "guardrailVersion": os.getenv("BEDROCK_GUARDRAIL_VERSION", "1")
+        }
+    )
+    return response
+
+@app.post("/v1/chat/secure-rag")
+async def secure_rag_endpoint(request: ChatRequest, api_key: str = Depends(verify_api_key)):
+    try:
+        # ── 【通常経路】 Bedrockへの非同期呼び出し ──
+        response = await asyncio.to_thread(call_bedrock_converse, request.context, request.query)
+        
+        if response.get("stopReason") == "guardrail_intervened":
+            return {"status": "blocked", "reason": "Guardrail intervened due to policy or grounding check."}
+            
+        answer = response["output"]["message"]["content"][0]["text"]
+        
+        # 成功したため、次回のフォールバック用に非同期でRedisキャッシュへ保存
+        import uuid
+        asyncio.create_task(asyncio.to_thread(save_to_semantic_cache, str(uuid.uuid4()), request.query, answer))
+        
+        return {"status": "success", "source": "live_bedrock", "answer": answer}
+        
+    except (pybreaker.CircuitBreakerError, Exception) as e:
+        # ── 【フォールバック発動】 AWS障害またはスロットリング時 ──
+        print(f"[INFO] AWS unavailable ({str(e)}). Querying Redis semantic cache...")
+        
+        fallback_answer = await asyncio.to_thread(search_semantic_cache, request.query)
+        
+        if fallback_answer:
+            return {
+                "status": "fallback_success",
+                "source": "redis_semantic_cache",
+                "warning": "AWS側が一時的に混雑しているため、過去の類似回答を提示しています。",
+                "answer": fallback_answer
+            }
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail="AWS service is busy/unavailable and no similar cached response is available."
+            )
