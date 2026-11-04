@@ -1,0 +1,54 @@
+import os
+from fastapi import FastAPI, HTTPException, Header, Depends
+from pydantic import BaseModel, Field
+from app.bedrock_service import bedrock_service
+
+app = FastAPI(
+    title="Async Secure RAG AI Gateway",
+    description="FastAPI + Amazon Bedrock Converse API & Guardrails (Contextual Grounding)",
+    version="1.0.0"
+)
+
+# 簡易認証用APIキー
+API_KEY = os.getenv("GATEWAY_API_KEY", "internal-secure-token")
+
+def verify_api_key(x_api_key: str = Header(...)):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid or missing API Key")
+    return x_api_key
+
+class RAGRequest(BaseModel):
+    context: str = Field(..., description="RAGのベクトル検索等で取得した参照ソース")
+    query: str = Field(..., description="ユーザーからの質問文")
+
+@app.post("/v1/chat/secure-rag")
+async def secure_rag_endpoint(request: RAGRequest, api_key: str = Depends(verify_api_key)):
+    # 非同期でBedrockサービスを呼び出し
+    result = await bedrock_service.invoke_secure_rag(request.context, request.query)
+    
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail={"error": "AWS Bedrock API Error", "message": result["error"]})
+    
+    response_data = result["data"]
+    stop_reason = response_data.get("stopReason")
+
+    # ガードレール（グラウンディング違反や有害表現）による介入の判定
+    if stop_reason == "guardrail_intervened":
+        return {
+            "status": "blocked",
+            "reason": "Guardrail intervened due to policy violation or grounding threshold failure.",
+            "trace": response_data.get("trace", {})
+        }
+
+    # 正常応答の抽出
+    answer_text = response_data["output"]["message"]["content"][0]["text"]
+    
+    return {
+        "status": "success",
+        "answer": answer_text,
+        "stop_reason": stop_reason
+    }
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "async-rag-gateway"}
