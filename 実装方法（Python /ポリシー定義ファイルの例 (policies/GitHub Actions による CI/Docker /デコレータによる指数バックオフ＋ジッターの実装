@@ -1,0 +1,44 @@
+import random
+import boto3
+from botocore.exceptions import ClientError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ThrottlingException を判定するためのカスタム関数
+def is_throttling_error(exception):
+    if isinstance(exception, ClientError):
+        error_code = exception.response.get("Error", {}).get("Code", "")
+        return error_code in ["ThrottlingException", "TooManyRequestsException", "ServiceUnavailable"]
+    return False
+
+# tenacity デコレータの設定：
+# - wait_exponential: 2秒から開始し、試行ごとに待機時間を指数関数的に増加（最大60秒）
+# - stop_after_attempt: 最大4回試行
+# - retry: スロットリング関連のエラーコードの時のみ再試行
+@retry(
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=1, min=2, max=60),
+    retry=retry_if_exception_type(ClientError),
+    before_sleep=lambda retry_state: logger.warning(f"Throttling detected. Retrying in {retry_state.upcoming_action}...")
+)
+def invoke_bedrock_with_backoff(client, model_id, messages, guardrail_config):
+    """
+    スロットリング発生時に自動で指数バックオフリトライを行うBedrock呼び出し関数
+    """
+    try:
+        response = client.converse(
+            modelId=model_id,
+            messages=messages,
+            guardrailConfig=guardrail_config
+        )
+        return response
+    except ClientError as e:
+        if is_throttling_error(e):
+            # tenacityにリトライさせるために例外を再送出
+            raise e
+        else:
+            # スロットリング以外の致命的エラー（例: 400 Bad Request等）は即座に停止
+            raise e
