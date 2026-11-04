@@ -1,0 +1,26 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllowSpecificModelInvocation",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream"
+            ],
+            "Resource": [
+                "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0"
+            ]
+        },
+        {
+            "Sid": "AllowSpecificGuardrailApplication",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:ApplyGuardrail"
+            ],
+            "Resource": [
+                "arn:aws:bedrock:us-east-1:123456789012:guardrail/your-guardrail-id-xxx"
+            ]
+        }
+    ]
+}
