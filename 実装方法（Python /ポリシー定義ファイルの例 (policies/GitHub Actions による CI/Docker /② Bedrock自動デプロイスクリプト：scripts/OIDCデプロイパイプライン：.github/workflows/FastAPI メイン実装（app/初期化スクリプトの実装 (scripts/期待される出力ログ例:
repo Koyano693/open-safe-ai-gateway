@@ -1,0 +1,6 @@
+ai-gateway  | [SYSTEM] Running startup tasks...
+ai-gateway  | [INFO] Connected to Redis at redis://redis-stack:6379
+ai-gateway  | [INFO] Index 'idx:rag_cache' not found. Creating new RediSearch HNSW index...
+ai-gateway  | [SUCCESS] RediSearch index 'idx:rag_cache' created successfully with HNSW vector support!
+ai-gateway  | INFO:     Started server process [7]
+ai-gateway  | INFO:     Application startup complete.
