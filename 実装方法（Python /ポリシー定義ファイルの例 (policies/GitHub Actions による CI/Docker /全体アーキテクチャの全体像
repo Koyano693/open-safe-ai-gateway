@@ -1,0 +1,8 @@
+[ 各種クライアント / アプリ ]
+        │
+        ▼ (FastAPI / 非同期Gateway)
+【 セキュアAIゲートウェイ 】
+  ├── 1. 入力層: PII自動マスク & インジェクション検知
+  ├── 2. 推論層: Amazon Bedrock (Converse API + Grounding Check)
+  ├── 3. 障害対策: サーキットブレーカー ＋ Redisセマンティックキャッシュ
+  └── 4. ガバナンス: Policy as Code (GitHub Actions → 自動反映)
