@@ -1,0 +1,7 @@
+terraform/
+├── main.tf        # プロバイダー設定とネットワーク (VPC / Subnet / VPC Endpoints)
+├── alb.tf         # ALBおよびターゲットグループ定義
+├── ecs.tf         # ECS Cluster / Task Definition / Service / IAM Task Role
+├── redis.tf       # ElastiCache (Redis / Valkey) サブネットグループ・セキュリティグループ
+├── variables.tf   # 変数定義
+└── outputs.tf     # 出力結果 (ALB DNS名など)
