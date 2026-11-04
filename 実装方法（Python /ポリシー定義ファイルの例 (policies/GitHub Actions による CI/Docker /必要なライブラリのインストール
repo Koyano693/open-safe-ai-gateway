@@ -1,0 +1,1 @@
+pip install fastapi uvicorn redis sentence-transformers boto3 pybreaker
