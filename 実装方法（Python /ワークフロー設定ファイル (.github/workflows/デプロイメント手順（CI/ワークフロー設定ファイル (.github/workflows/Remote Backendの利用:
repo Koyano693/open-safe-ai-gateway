@@ -1,0 +1,9 @@
+# main.tf の先頭に追加する設定例
+terraform {
+  backend "s3" {
+    bucket         = "your-terraform-state-bucket-name"
+    key            = "safe-ai-gateway/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-lock-table"
+  }
+}
