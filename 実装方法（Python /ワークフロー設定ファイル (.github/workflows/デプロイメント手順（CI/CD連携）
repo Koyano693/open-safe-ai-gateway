@@ -1,0 +1,13 @@
+[ Git Push (main) ]
+       │
+       ▼
+ 1. pytest による自動テスト実行
+       │
+       ▼ (テスト成功)
+ 2. Amazon ECR へ Docker イメージのビルド & プッシュ (AWS CLI / OIDC)
+       │
+       ▼
+ 3. deploy_to_bedrock.py による Guardrails の自動更新
+       │
+       ▼
+ 4. ECS サービスアップデート (aws ecs update-service --force-new-deployment)
